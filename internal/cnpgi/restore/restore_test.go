@@ -20,7 +20,10 @@ SPDX-License-Identifier: Apache-2.0
 package restore
 
 import (
+	barmanapi "github.com/cloudnative-pg/barman-cloud/pkg/api"
+	barmanUtils "github.com/cloudnative-pg/barman-cloud/pkg/utils"
 	cnpgv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
+	machineryapi "github.com/cloudnative-pg/machinery/pkg/api"
 	"k8s.io/utils/ptr"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -62,5 +65,28 @@ var _ = Describe("resolveRestoreEmptyWalArchiveCheck", func() {
 			Entry("unrelated annotation value: check runs", ptr.To("something-else"), true),
 			Entry("empty annotation value: check runs", ptr.To(""), true),
 		)
+	})
+})
+
+var _ = Describe("restoreDataDirOptions", func() {
+	It("passes the SSE-C customer key to barman-cloud-restore", func(ctx SpecContext) {
+		keyRef := &machineryapi.SecretKeySelector{
+			LocalObjectReference: machineryapi.LocalObjectReference{Name: "sse-c-key"},
+			Key:                  "key",
+		}
+		configuration := &cnpgv1.BarmanObjectStoreConfiguration{
+			DestinationPath: "s3://bucket/path",
+			BarmanCredentials: barmanapi.BarmanCredentials{AWS: &barmanapi.S3Credentials{
+				InheritFromIAMRole: true,
+				SSECustomerKey:     keyRef,
+			}},
+		}
+		backup := &cnpgv1.Backup{Status: cnpgv1.BackupStatus{
+			DestinationPath: "s3://bucket/path", ServerName: "cluster", BackupID: "backup",
+		}}
+
+		options, err := JobHookImpl{PgDataPath: "/pgdata"}.restoreDataDirOptions(ctx, backup, configuration)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(options).To(ContainElements("--sse-customer-key", "file://"+barmanUtils.SSECustomerKeyFilePath(keyRef)))
 	})
 })

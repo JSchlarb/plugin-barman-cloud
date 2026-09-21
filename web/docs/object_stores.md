@@ -246,18 +246,37 @@ spec:
   [...]
 ```
 
-The same key is applied to **every** operation — base backups, WAL archiving,
-WAL restore, and data restore — so it must remain unchanged and available for
-the whole lifetime of the backups it protects. `sseCustomerKey` can be combined
-with any authentication method, including `inheritFromIAMRole`, but not with
-the bucket-managed `encryption` setting (SSE-S3 / SSE-KMS) of the `data` and
-`wal` sections: `barman-cloud` rejects `--sse-customer-key` together with
-`--encryption`, so an object store that sets both fails at the first backup or
-WAL archive.
+The secret must live in the same namespace as the `ObjectStore` and the
+`Cluster`. The plugin mounts the key only into its sidecar container, never
+into the PostgreSQL container, and passes it to every `barman-cloud` command
+that reads or writes objects.
+
+`sseCustomerKey` can be combined with any authentication method, including
+`inheritFromIAMRole`, but not with the bucket-managed `encryption` setting
+(SSE-S3 / SSE-KMS) of the `data` and `wal` sections: `barman-cloud` rejects
+`--sse-customer-key` together with `--encryption`, so every backup and WAL
+archive of such an object store fails with an error in the sidecar log.
+
+:::warning
+All backups and WAL files of a server must be encrypted with the same SSE-C
+key: mixing objects with and without SSE-C, or objects encrypted with
+different keys, makes the `barman-cloud` commands fail (see the
+[Barman documentation](https://docs.pgbarman.org/release/3.20.0/user_guide/barman_cloud.html)).
+Therefore:
+
+- enable SSE-C only on an empty `destinationPath`;
+- never change the key, neither the `sseCustomerKey` reference nor the
+  content of the secret; to use a new key, use a new `destinationPath`.
+
+Backups that the current key cannot read disappear from the backup catalog:
+the plugin deletes the corresponding `Backup` objects, and the retention
+policy can no longer be enforced.
+:::
 
 :::note
-SSE-C relies on the `--sse-customer-key` option introduced in Barman 3.20.0,
-which the plugin sidecar image ships starting from version 0.15.0.
+SSE-C requires Barman 3.20.0 or later in the sidecar image, which introduced
+the `--sse-customer-key` option, and a plugin version supporting the
+`sseCustomerKey` field.
 :::
 
 ### Using Object Storage with a Private CA

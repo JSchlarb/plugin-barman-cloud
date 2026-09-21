@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"strings"
 
+	barmanUtils "github.com/cloudnative-pg/barman-cloud/pkg/utils"
 	cnpgv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
 	"github.com/cloudnative-pg/cnpg-i-machinery/pkg/pluginhelper/decoder"
 	"github.com/cloudnative-pg/cnpg-i-machinery/pkg/pluginhelper/object"
@@ -145,23 +146,30 @@ func (impl LifecycleImplementation) reconcileJob(
 		return nil, err
 	}
 
+	sseCustomerKeys, err := impl.collectSSECustomerKeys(ctx, pluginConfiguration)
+	if err != nil {
+		return nil, err
+	}
+
 	resources, err := impl.collectSidecarResourcesForRecoveryJob(ctx, pluginConfiguration)
 	if err != nil {
 		return nil, err
 	}
 
 	return reconcileJob(ctx, cluster, request, sidecarConfiguration{
-		env:          env,
-		certificates: certificates,
-		resources:    resources,
+		env:             env,
+		certificates:    certificates,
+		sseCustomerKeys: sseCustomerKeys,
+		resources:       resources,
 	})
 }
 
 type sidecarConfiguration struct {
-	env            []corev1.EnvVar
-	certificates   []corev1.VolumeProjection
-	resources      corev1.ResourceRequirements
-	additionalArgs []string
+	env             []corev1.EnvVar
+	certificates    []corev1.VolumeProjection
+	sseCustomerKeys []corev1.VolumeProjection
+	resources       corev1.ResourceRequirements
+	additionalArgs  []string
 }
 
 func reconcileJob(
@@ -238,6 +246,11 @@ func (impl LifecycleImplementation) reconcilePod(
 		return nil, err
 	}
 
+	sseCustomerKeys, err := impl.collectSSECustomerKeys(ctx, pluginConfiguration)
+	if err != nil {
+		return nil, err
+	}
+
 	resources, err := impl.collectSidecarResourcesForPod(ctx, pluginConfiguration)
 	if err != nil {
 		return nil, err
@@ -249,10 +262,11 @@ func (impl LifecycleImplementation) reconcilePod(
 	}
 
 	return reconcileInstancePod(ctx, cluster, request, pluginConfiguration, sidecarConfiguration{
-		env:            env,
-		certificates:   certificates,
-		resources:      resources,
-		additionalArgs: additionalArgs,
+		env:             env,
+		certificates:    certificates,
+		sseCustomerKeys: sseCustomerKeys,
+		resources:       resources,
+		additionalArgs:  additionalArgs,
 	})
 }
 
@@ -502,26 +516,10 @@ func reconcilePodSpec(
 		}
 	}
 
-	if len(config.certificates) > 0 {
-		sidecarTemplate.VolumeMounts = ensureVolumeMount(
-			sidecarTemplate.VolumeMounts,
-			corev1.VolumeMount{
-				Name:      barmanCertificatesVolumeName,
-				MountPath: metadata.BarmanCertificatesPath,
-			})
-
-		spec.Volumes = ensureVolume(spec.Volumes, corev1.Volume{
-			Name: barmanCertificatesVolumeName,
-			VolumeSource: corev1.VolumeSource{
-				Projected: &corev1.ProjectedVolumeSource{
-					Sources: config.certificates,
-				},
-			},
-		})
-	} else {
-		sidecarTemplate.VolumeMounts = removeVolumeMount(sidecarTemplate.VolumeMounts, barmanCertificatesVolumeName)
-		spec.Volumes = removeVolume(spec.Volumes, barmanCertificatesVolumeName)
-	}
+	reconcileProjectedVolume(spec, &sidecarTemplate, barmanCertificatesVolumeName,
+		metadata.BarmanCertificatesPath, config.certificates)
+	reconcileProjectedVolume(spec, &sidecarTemplate, sseCustomerKeysVolumeName,
+		barmanUtils.SSECustomerKeyDirectory, config.sseCustomerKeys)
 
 	if err := injectPluginSidecarPodSpec(spec, &sidecarTemplate, mainContainerName); err != nil {
 		return err
@@ -622,6 +620,32 @@ func ensureVolume(volumes []corev1.Volume, volume corev1.Volume) []corev1.Volume
 	}
 
 	return volumes
+}
+
+// reconcileProjectedVolume mounts the sources in the sidecar only.
+func reconcileProjectedVolume(
+	spec *corev1.PodSpec,
+	sidecar *corev1.Container,
+	name string,
+	mountPath string,
+	sources []corev1.VolumeProjection,
+) {
+	if len(sources) == 0 {
+		sidecar.VolumeMounts = removeVolumeMount(sidecar.VolumeMounts, name)
+		spec.Volumes = removeVolume(spec.Volumes, name)
+		return
+	}
+
+	sidecar.VolumeMounts = ensureVolumeMount(sidecar.VolumeMounts, corev1.VolumeMount{
+		Name:      name,
+		MountPath: mountPath,
+	})
+	spec.Volumes = ensureVolume(spec.Volumes, corev1.Volume{
+		Name: name,
+		VolumeSource: corev1.VolumeSource{
+			Projected: &corev1.ProjectedVolumeSource{Sources: sources},
+		},
+	})
 }
 
 // ensureVolumeMount makes sure the passed volume mounts are present in the list of volume mounts.

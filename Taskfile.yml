@@ -377,8 +377,8 @@ tasks:
         - REGISTRY_USER
         - REGISTRY_PASSWORD
     vars:
-      PLUGIN_IMAGE_NAME: ghcr.io/{{.GITHUB_REPOSITORY}}{{if not (hasPrefix "refs/tags/v" .GITHUB_REF)}}-testing{{end}}
-      SIDECAR_IMAGE_NAME: ghcr.io/{{.GITHUB_REPOSITORY}}-sidecar{{if not (hasPrefix "refs/tags/v" .GITHUB_REF)}}-testing{{end}}
+      PLUGIN_IMAGE_NAME: ghcr.io/{{lower .GITHUB_REPOSITORY}}{{if not (hasPrefix "refs/tags/v" .GITHUB_REF)}}-testing{{end}}
+      SIDECAR_IMAGE_NAME: ghcr.io/{{lower .GITHUB_REPOSITORY}}-sidecar{{if not (hasPrefix "refs/tags/v" .GITHUB_REF)}}-testing{{end}}
       # remove /merge suffix from the branch name. This is a workaround for the GitHub workflow on PRs,
       # where the branch name is suffixed with /merge. Prepend pr- to the branch name on PRs.
       # Any remaining "/" (e.g. from namespaced branches like "dev/foo") is replaced with "-" since
@@ -469,8 +469,8 @@ tasks:
         - GITHUB_REF
         - GITHUB_REF_NAME
     vars:
-      PLUGIN_IMAGE_NAME: ghcr.io/{{.GITHUB_REPOSITORY}}{{if not (hasPrefix "refs/tags/v" .GITHUB_REF)}}-testing{{end}}
-      SIDECAR_IMAGE_NAME: ghcr.io/{{.GITHUB_REPOSITORY}}-sidecar{{if not (hasPrefix "refs/tags/v" .GITHUB_REF)}}-testing{{end}}
+      PLUGIN_IMAGE_NAME: ghcr.io/{{lower .GITHUB_REPOSITORY}}{{if not (hasPrefix "refs/tags/v" .GITHUB_REF)}}-testing{{end}}
+      SIDECAR_IMAGE_NAME: ghcr.io/{{lower .GITHUB_REPOSITORY}}-sidecar{{if not (hasPrefix "refs/tags/v" .GITHUB_REF)}}-testing{{end}}
       # remove /merge suffix from the branch name. This is a workaround for the GitHub workflow on PRs,
       # where the branch name is suffixed with /merge. Prepend pr- to the branch name on PRs.
       # Any remaining "/" (e.g. from namespaced branches like "dev/foo") is replaced with "-" since

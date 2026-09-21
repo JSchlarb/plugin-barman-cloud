@@ -165,19 +165,18 @@ func (impl JobHookImpl) Restore(
 	}, nil
 }
 
-// restoreDataDir restores PGDATA from an existing backup
-func (impl JobHookImpl) restoreDataDir(
+func (impl JobHookImpl) restoreDataDirOptions(
 	ctx context.Context,
 	backup *cnpgv1.Backup,
-	env []string,
 	barmanConfiguration *cnpgv1.BarmanObjectStoreConfiguration,
-) error {
+) ([]string, error) {
 	var options []string
 
 	options, err := barmanCommand.AppendCloudProviderOptionsFromConfiguration(ctx, options, barmanConfiguration)
 	if err != nil {
-		return err
+		return nil, err
 	}
+	options = barmanCommand.AppendSSECustomerKeyOption(options, barmanConfiguration)
 
 	if backup.Status.EndpointURL != "" {
 		options = append(options, "--endpoint-url", backup.Status.EndpointURL)
@@ -189,6 +188,21 @@ func (impl JobHookImpl) restoreDataDir(
 	options = append(options, backup.Status.ServerName)
 	options = append(options, backup.Status.BackupID)
 	options = append(options, impl.PgDataPath)
+
+	return options, nil
+}
+
+// restoreDataDir restores PGDATA from an existing backup
+func (impl JobHookImpl) restoreDataDir(
+	ctx context.Context,
+	backup *cnpgv1.Backup,
+	env []string,
+	barmanConfiguration *cnpgv1.BarmanObjectStoreConfiguration,
+) error {
+	options, err := impl.restoreDataDirOptions(ctx, backup, barmanConfiguration)
+	if err != nil {
+		return err
+	}
 
 	log.Info("Starting barman-cloud-restore",
 		"options", options)

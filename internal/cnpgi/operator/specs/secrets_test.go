@@ -51,7 +51,8 @@ var _ = Describe("CollectSecretNamesFromCredentials", func() {
 			Expect(secrets).To(ContainElement("aws-secret"))
 		})
 
-		It("should include the SSE-C customer key secret", func() {
+		// kubelet mounts the key, the sidecar does not read the secret
+		It("should not include the SSE-C customer key secret", func() {
 			credentials := &barmanapi.BarmanCredentials{
 				AWS: &barmanapi.S3Credentials{
 					InheritFromIAMRole: true,
@@ -65,7 +66,7 @@ var _ = Describe("CollectSecretNamesFromCredentials", func() {
 			}
 
 			secrets := CollectSecretNamesFromCredentials(credentials)
-			Expect(secrets).To(ConsistOf("sse-c-key"))
+			Expect(secrets).To(BeEmpty())
 		})
 
 		It("should handle nil AWS credentials", func() {

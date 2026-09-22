@@ -22,7 +22,6 @@ package walrestore
 import (
 	cloudnativepgv1 "github.com/cloudnative-pg/api/pkg/api/v1"
 	barmanapi "github.com/cloudnative-pg/barman-cloud/pkg/api"
-	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
@@ -92,86 +91,6 @@ func newCluster(namespace string) *cloudnativepgv1.Cluster {
 			},
 			StorageConfiguration: cloudnativepgv1.StorageConfiguration{
 				Size: storageSize,
-			},
-		},
-	}
-}
-
-// newS3ClientDeployment returns a deployment running the AWS CLI configured to
-// talk to the in-namespace S3 service. The test execs `aws s3` commands in
-// it to forge WAL segments on the object store and to check their presence.
-func newS3ClientDeployment(namespace string) *appsv1.Deployment {
-	labels := map[string]string{"app": s3ClientName}
-	return &appsv1.Deployment{
-		TypeMeta: metav1.TypeMeta{
-			Kind:       "Deployment",
-			APIVersion: "apps/v1",
-		},
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      s3ClientName,
-			Namespace: namespace,
-		},
-		Spec: appsv1.DeploymentSpec{
-			Replicas: ptr.To(int32(1)),
-			Selector: &metav1.LabelSelector{MatchLabels: labels},
-			Template: corev1.PodTemplateSpec{
-				ObjectMeta: metav1.ObjectMeta{Labels: labels},
-				Spec: corev1.PodSpec{
-					Containers: []corev1.Container{
-						{
-							Name: s3ClientName,
-							// renovate: datasource=docker depName=amazon/aws-cli versioning=docker
-							// Version: 2.36.32
-							Image:   "docker.io/amazon/aws-cli@sha256:f630107e3eadb6479fa441631bbf50d15cf354a6ace85b6028bf6b3e5c69c605",
-							Command: []string{"sleep", "infinity"},
-							Env: []corev1.EnvVar{
-								{
-									Name:  "AWS_ENDPOINT_URL",
-									Value: "http://" + s3Name + ":9000",
-								},
-								{
-									Name: "AWS_ACCESS_KEY_ID",
-									ValueFrom: &corev1.EnvVarSource{
-										SecretKeyRef: &corev1.SecretKeySelector{
-											LocalObjectReference: corev1.LocalObjectReference{Name: s3Name},
-											Key:                  "ACCESS_KEY_ID",
-										},
-									},
-								},
-								{
-									Name: "AWS_SECRET_ACCESS_KEY",
-									ValueFrom: &corev1.EnvVarSource{
-										SecretKeyRef: &corev1.SecretKeySelector{
-											LocalObjectReference: corev1.LocalObjectReference{Name: s3Name},
-											Key:                  "ACCESS_SECRET_KEY",
-										},
-									},
-								},
-								{
-									Name:  "AWS_DEFAULT_REGION",
-									Value: "us-east-1",
-								},
-								// The CRC-based default checksums introduced in AWS
-								// CLI 2.23 are not supported by every S3-compatible
-								// object store.
-								{
-									Name:  "AWS_REQUEST_CHECKSUM_CALCULATION",
-									Value: "when_required",
-								},
-								{
-									Name:  "AWS_RESPONSE_CHECKSUM_VALIDATION",
-									Value: "when_required",
-								},
-							},
-							SecurityContext: &corev1.SecurityContext{
-								AllowPrivilegeEscalation: ptr.To(false),
-								SeccompProfile: &corev1.SeccompProfile{
-									Type: corev1.SeccompProfileTypeRuntimeDefault,
-								},
-							},
-						},
-					},
-				},
 			},
 		},
 	}

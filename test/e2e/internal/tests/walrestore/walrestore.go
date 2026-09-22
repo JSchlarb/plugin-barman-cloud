@@ -20,7 +20,6 @@ SPDX-License-Identifier: Apache-2.0
 package walrestore
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"strconv"
@@ -39,6 +38,7 @@ import (
 	"github.com/cloudnative-pg/plugin-barman-cloud/test/e2e/internal/command"
 	"github.com/cloudnative-pg/plugin-barman-cloud/test/e2e/internal/deployment"
 	nmsp "github.com/cloudnative-pg/plugin-barman-cloud/test/e2e/internal/namespace"
+	"github.com/cloudnative-pg/plugin-barman-cloud/test/e2e/internal/objectstore"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -80,29 +80,6 @@ func walObjectURI(name string) string {
 	return fmt.Sprintf("s3://%s/%s/wals/%s/%s", bucket, clusterName, walLogDir, name)
 }
 
-// execInPod runs a command in the given container and returns stdout, stderr
-// and the error (non-nil for a non-zero exit code).
-func execInPod(
-	ctx context.Context,
-	clientSet *kubernetes.Clientset,
-	cfg *rest.Config,
-	namespace, pod, container string,
-	args ...string,
-) (string, string, error) {
-	return command.ExecuteInContainer(
-		ctx,
-		*clientSet,
-		cfg,
-		command.ContainerLocator{
-			NamespaceName: namespace,
-			PodName:       pod,
-			ContainerName: container,
-		},
-		nil,
-		args,
-	)
-}
-
 // This test drives the plugin's parallel WAL restore directly: it invokes the
 // instance-manager wal-restore command on the standby (which delegates to the
 // plugin) and asserts the prefetch/spool/end-of-wal-stream state machine with
@@ -142,7 +119,7 @@ var _ = Describe("Parallel WAL restore", func() {
 			Expect(cl.Create(ctx, newObjectStore(ns))).To(Succeed())
 
 			By("deploying the S3 client used to forge and inspect WAL segments")
-			Expect(cl.Create(ctx, newS3ClientDeployment(ns))).To(Succeed())
+			Expect(cl.Create(ctx, objectstore.NewS3ClientDeployment(ns, s3ClientName, s3Name))).To(Succeed())
 
 			By("creating the cluster using the plugin as WAL archiver")
 			cluster := newCluster(ns)
@@ -178,45 +155,45 @@ var _ = Describe("Parallel WAL restore", func() {
 			// Operations scoped to the fixed pods/clients, kept as closures so the
 			// step assertions below read like the original state-machine table.
 			restore := func(name string) error {
-				_, _, err := execInPod(ctx, clientSet, cfg, ns, standby, postgresContainer,
+				_, _, err := command.ExecInPod(ctx, clientSet, cfg, ns, standby, postgresContainer,
 					managerExecutable, "wal-restore", name, pgWalPath+"/"+name)
 				return err
 			}
 			existsIn := func(dir, name string) bool {
-				_, _, err := execInPod(ctx, clientSet, cfg, ns, standby, postgresContainer,
+				_, _, err := command.ExecInPod(ctx, clientSet, cfg, ns, standby, postgresContainer,
 					"test", "-f", dir+"/"+name)
 				return err == nil
 			}
 			flagSet := func() bool { return existsIn(spoolDirectory, endOfWALStreamFlag) }
 			spoolSegments := func() int {
-				out, _, _ := execInPod(ctx, clientSet, cfg, ns, standby, postgresContainer,
+				out, _, _ := command.ExecInPod(ctx, clientSet, cfg, ns, standby, postgresContainer,
 					"sh", "-c",
 					"ls -1 "+spoolDirectory+" 2>/dev/null | grep -Ec '^[0-9A-F]{24}$' || true")
 				n, _ := strconv.Atoi(strings.TrimSpace(out))
 				return n
 			}
 			purgeSpool := func() {
-				_, _, _ = execInPod(ctx, clientSet, cfg, ns, standby, postgresContainer,
+				_, _, _ = command.ExecInPod(ctx, clientSet, cfg, ns, standby, postgresContainer,
 					"sh", "-c", "rm -f "+spoolDirectory+"/* 2>/dev/null; true")
 			}
 			forge := func(src, dst string) {
 				// ExecuteInContainer drops stdout/stderr on a non-zero exit, so on
 				// failure this only reports the exit code, not the aws CLI's error text.
-				_, _, err := execInPod(ctx, clientSet, cfg, ns, s3Client, s3ClientName,
+				_, _, err := command.ExecInPod(ctx, clientSet, cfg, ns, s3Client, s3ClientName,
 					"aws", "s3", "cp", walObjectURI(src), walObjectURI(dst))
 				Expect(err).NotTo(HaveOccurred(), "forging %s -> %s", src, dst)
 			}
 			objectExists := func(name string) bool {
-				out, _, err := execInPod(ctx, clientSet, cfg, ns, s3Client, s3ClientName,
+				out, _, err := command.ExecInPod(ctx, clientSet, cfg, ns, s3Client, s3ClientName,
 					"aws", "s3", "ls", walObjectURI(name))
 				return err == nil && strings.TrimSpace(out) != ""
 			}
 
 			By("archiving a real WAL on the primary and learning its name")
-			_, _, err := execInPod(ctx, clientSet, cfg, ns, primary, postgresContainer,
+			_, _, err := command.ExecInPod(ctx, clientSet, cfg, ns, primary, postgresContainer,
 				"psql", "-tAc", "CHECKPOINT")
 			Expect(err).NotTo(HaveOccurred(), "CHECKPOINT on the primary failed")
-			out, _, err := execInPod(ctx, clientSet, cfg, ns, primary, postgresContainer,
+			out, _, err := command.ExecInPod(ctx, clientSet, cfg, ns, primary, postgresContainer,
 				"psql", "-tAc", "SELECT pg_walfile_name(pg_switch_wal())")
 			Expect(err).NotTo(HaveOccurred(), "switching WAL on the primary failed")
 			latestWAL := strings.TrimSpace(out)

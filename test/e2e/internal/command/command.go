@@ -87,3 +87,25 @@ func ExecuteInContainer(
 
 	return stdout.String(), stderr.String(), nil
 }
+
+// ExecInPod is ExecuteInContainer without a timeout.
+func ExecInPod(
+	ctx context.Context,
+	clientSet *kubernetes.Clientset,
+	cfg *rest.Config,
+	namespace, pod, container string,
+	args ...string,
+) (string, string, error) {
+	return ExecuteInContainer(
+		ctx,
+		*clientSet,
+		cfg,
+		ContainerLocator{
+			NamespaceName: namespace,
+			PodName:       pod,
+			ContainerName: container,
+		},
+		nil,
+		args,
+	)
+}
